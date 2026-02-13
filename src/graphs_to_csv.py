@@ -73,20 +73,41 @@ CSV_HEADERS = ("demoName", "roundIdx") + \
 
 
 def parse_graph_data(graph_data):
-  return [graph_data[key] for key in KEYS_ROUND_LEVEL]
+  # Handle missing keys gracefully - use None or 0 as default if key doesn't exist
+  result = []
+  for key in KEYS_ROUND_LEVEL:
+    if key in graph_data:
+      result.append(graph_data[key])
+    else:
+      # Default values for missing keys
+      result.append(None)
+  return result
 
 
 def parse_node_data(node_data):
   # bug in create_graphs.py: players are ids 0,1,2,3,4 but bomb and bombsites are 6,7,8
   # players are index 0-4, ignore bomb and bombsites, they have no node attributes
   # iterate via range because order of index must remain constant
-  return [node_data[i][key] for i in range(5) for key in KEYS_PLAYER_LEVEL]
+  result = []
+  for i in range(5):
+    for key in KEYS_PLAYER_LEVEL:
+      if i in node_data and key in node_data[i]:
+        result.append(node_data[i][key])
+      else:
+        result.append(None)
+  return result
 
 
 def parse_edges_data(edges_data):
   # make sure we always have same order
   edges_data.sort(key=lambda x: (x[0], x))
-  return [edge[2]['dist'] for edge in edges_data]
+  result = []
+  for edge in edges_data:
+    if len(edge) > 2 and 'dist' in edge[2]:
+      result.append(edge[2]['dist'])
+    else:
+      result.append(None)
+  return result
 
 
 def main():
@@ -97,25 +118,45 @@ def main():
       print(f"Writing output to {output_name} from {graphs_folder}")
       writer = csv.writer(f_out)
       writer.writerow(CSV_HEADERS)
-      pkl_files = list(graphs_folder.rglob("*.pkl")) # for len
+      pkl_files = list(graphs_folder.rglob("*.pkl"))
       len_pkl_files = len(pkl_files)
+      
+      if len_pkl_files == 0:
+        print(f"Warning: No .pkl files found in {graphs_folder}")
+        return
+      
+      frames_written = 0
       for idx, pkl_file in enumerate(pkl_files):
         file_name = pkl_file.name
         demo_name = pkl_file.parent.name
         round_idx = pkl_file.stem.rpartition("-")[2]
         print(f"Loading demo round file: {file_name} ({idx+1}/{len_pkl_files})")
-        with open(pkl_file, "rb") as f:
-          frames = pickle.load(f)
-          for frame in frames:
-            writer.writerow(
-              [demo_name, round_idx] +
-              parse_graph_data(frame["graph_data"]) +
-              parse_node_data(frame["nodes_data"]) +
-              parse_edges_data(frame["edges_data"]))
-          print(f"Written {len(frames)} to file.")
+        
+        try:
+          with open(pkl_file, "rb") as f:
+            frames = pickle.load(f)
+            for frame in frames:
+              try:
+                row = [demo_name, round_idx] + \
+                      parse_graph_data(frame["graph_data"]) + \
+                      parse_node_data(frame["nodes_data"]) + \
+                      parse_edges_data(frame["edges_data"])
+                writer.writerow(row)
+                frames_written += 1
+              except KeyError as e:
+                print(f"  Warning: Skipped frame due to missing key {e}")
+                continue
+            print(f"  Written {len(frames)} frames from {file_name}")
+        except Exception as e:
+          print(f"  Error loading {pkl_file}: {e}")
+          continue
+      
+      print(f"✅ Successfully wrote {frames_written} total frames to {output_name}")
       return
   except Exception as e:
     print(f"Failed: {e}")
+    import traceback
+    traceback.print_exc()
 
 
 def main_onlyprint():
