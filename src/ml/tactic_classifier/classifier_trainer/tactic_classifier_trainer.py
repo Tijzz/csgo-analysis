@@ -1,16 +1,10 @@
 import os
-import joblib
-import numpy as np
 import torch
 import torch.nn as nn
 
-from collections import Counter
 from typing import Dict, Tuple, Optional
-from pretrained_classifier import PretrainedTacticClassifier
-from tactic_feature_dataset import TacticFeatureDataset
-from sklearn.utils.class_weight import compute_class_weight
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import DataLoader
 from torchmetrics import Accuracy, F1Score, Precision, Recall
 
 class TacticClassifierTrainer:
@@ -29,7 +23,7 @@ class TacticClassifierTrainer:
         self,
         model: nn.Module,
         device: torch.device = None,
-        checkpoint_dir: str = "research_project/mlmodels"
+        checkpoint_dir: str = "mlmodels"
     ):
         """
         Initialize trainer.
@@ -51,7 +45,7 @@ class TacticClassifierTrainer:
         
         print(f"Using device: {self.device}")
     
-    def train_with_finetuning(
+    def train_model(
         self,
         train_loader: DataLoader,
         val_loader: DataLoader,
@@ -63,7 +57,7 @@ class TacticClassifierTrainer:
         patience: int = 10,
     ) -> Dict:
         """
-        Finetune the pretrained model on labeled data.
+        Train the model on labeled data.
         
         Args:
             train_loader: DataLoader for training set
@@ -78,11 +72,8 @@ class TacticClassifierTrainer:
         Returns:
             Dictionary with training history and metrics
         """
-        print("\n" + "="*60)
-        print("Starting Model Finetuning on Labeled Tactic Data")
-        print("="*60)
-        
-        # Setup optimizer: Adam is good for fine-tuning pretrained models
+        print("\n" + "="*60 + f"\nStarting Model Training on Labeled Tactic Data\n" + "="*60)
+
         optimizer = torch.optim.Adam(
             self.model.parameters(),
             lr=learning_rate,
@@ -366,133 +357,7 @@ class TacticClassifierTrainer:
         print(f"Loaded checkpoint from {checkpoint_path}")
 
 
-def train_pretrained_classifier(
-    graph_root_dir: str = "",
-    tactics_json_path: str = "",
-    num_epochs: int = 50,
-    batch_size: int = 32,
-    learning_rate: float = 0.001,
-    train_split: float = 0.7,
-    val_split: float = 0.15,
-):
-    """
-    Args:
-        graph_root_dir: Directory containing graph data
-        tactics_json_path: Path to tactic definitions
-        num_epochs: Maximum training epochs
-        batch_size: Batch size for training
-        learning_rate: Initial learning rate
-        train_split: Proportion of data for training (0.0-1.0)
-        val_split: Proportion of remaining data for validation
-    """
-    print("\n" + "="*60)
-    print("Initializing Pretrained Classifier Training Pipeline")
-    print("="*60)
-    
-    # Device selection
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
-    # Load dataset
-    print("\nLoading raw graph data with labels...")
-    dataset = TacticFeatureDataset(
-        data_root_dir=graph_root_dir,
-        tactics_json_path=tactics_json_path
-    )
-    
-    # Print dataset statistics
-    print(f"Total samples: {len(dataset)}")
-    labels = [label for _, label in dataset]
-    label_counts = Counter(labels)
-    print(f"Label distribution: {dict(label_counts)}")
-    
-    # Compute class weights for handling imbalance
-    unique_labels = np.array(sorted(set(labels)))
-    class_weights = compute_class_weight(
-        class_weight="balanced",
-        classes=unique_labels,
-        y=labels
-    )
-    class_weights_tensor = torch.tensor(class_weights, dtype=torch.float)
-    print(f"Class weights: {class_weights}")
-    
-    # Split dataset into train/val/test
-    print("\nSplitting data into train/val/test sets...")
-    train_size = int(train_split * len(dataset))
-    remaining_size = len(dataset) - train_size
-    val_size = int(val_split * remaining_size)
-    test_size = remaining_size - val_size
-    
-    train_set, val_set, test_set = random_split(
-        dataset,
-        [train_size, val_size, test_size]
-    )
-    
-    print(f"Train: {len(train_set)}, Validation: {len(val_set)}, Test: {len(test_set)}")
-    
-    # Create data loaders
-    train_loader = DataLoader(
-        train_set,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=0
-    )
-    val_loader = DataLoader(
-        val_set,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=0
-    )
-    test_loader = DataLoader(
-        test_set,
-        batch_size=batch_size,
-        shuffle=False,
-        num_workers=0
-    )
-    
-    # Initialize model
-    print("\nInitializing pretrained model...")
-    input_dim = dataset[0][0].shape[0]  # Get feature dimension (max_nodes * 7 raw features per node)
-    num_classes = len(dataset.label_to_id)
-    
-    # Scale hidden dimensions based on input size
-    # Hidden dims should be progressively smaller than input_dim
-    hidden_dims = [
-        max(128, int(input_dim * 0.5)),  # First hidden layer: ~50% of input
-        max(64, int(input_dim * 0.25)),   # Second hidden layer: ~25% of input
-        32  # Final hidden layer before classification
-    ]
-    
-    model = PretrainedTacticClassifier(
-        input_dim=input_dim,
-        hidden_dims=hidden_dims,
-        num_classes=num_classes,
-        dropout_rate=0.3
-    )
-    
-    print(f"Input dimension: {input_dim} (raw node features: max_nodes={dataset.max_nodes} * 7 features/node)")
-    print(f"Hidden dimensions: {hidden_dims}")
-    print(f"Number of classes: {num_classes}")
-    print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
-    
-    # Initialize trainer
-    trainer = TacticClassifierTrainer(model, device=device)
-    
-    # Train with finetuning
-    history = trainer.train_with_finetuning(
-        train_loader=train_loader,
-        val_loader=val_loader,
-        test_loader=test_loader,
-        num_epochs=num_epochs,
-        learning_rate=learning_rate,
-        class_weights=class_weights_tensor,
-        patience=10
-    )
-    
-    print("\n" + "="*60)
-    print("Training Complete!")
-    print("="*60)
-    
-    return model, dataset, history
+
 
 
 # def predict_on_raw_data(
@@ -591,11 +456,3 @@ def train_pretrained_classifier(
 #     return node_array.flatten()
 
 
-if __name__ == "__main__":
-    model, dataset, history = train_pretrained_classifier(
-        graph_root_dir = "data/preprocessed/de_dust2",
-        tactics_json_path = "data/tactic_labels/de_dust2_tactics.json",
-        num_epochs=50,
-        batch_size=32,
-        learning_rate=0.001
-    )

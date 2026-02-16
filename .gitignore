@@ -5,6 +5,7 @@ data/all-frames.csv
 data/all-frames-old.csv
 data/preprocessed/
 data/exported/
+data/results/
 
 # R history
 .Rhistory

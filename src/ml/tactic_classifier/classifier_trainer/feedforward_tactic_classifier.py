@@ -3,7 +3,7 @@ from typing import List
 import torch
 import torch.nn as nn
 
-class PretrainedTacticClassifier(nn.Module):
+class FeedforwardTacticClassifier(nn.Module):
     """
     Pretrained neural network classifier adapted for CSGO tactic prediction.
     
